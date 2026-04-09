@@ -1,52 +1,62 @@
 import { Octokit } from "@octokit/rest";
 
-// إعداد الاتصال بجيت هب باستخدام التوكن بتاعك
+// إعداد الاتصال بجيت هب
 const octokit = new Octokit({
-  auth: process.env.GITHUB_TOKEN, // هنضيف ده في إعدادات Vercel
+  auth: process.env.GITHUB_TOKEN, // المفتاح اللي حطيناه في Environment Variables
 });
 
+// إعدادات حجم الملف المسموح به على Vercel
 export const config = {
   api: {
     bodyParser: {
-      sizeLimit: '10mb', // تقدر تزود الحجم حسب الحاجة (Vercel Free حده 4.5MB للطلب الواحد)
+      sizeLimit: '10mb', 
     },
   },
 };
 
 export default async function handler(req, res) {
+  // السماح فقط بطلبات POST
   if (req.method !== 'POST') {
-    return res.status(405).json({ message: 'فقط طلبات POST مسموحة' });
+    return res.status(405).json({ message: 'Only POST requests allowed' });
   }
 
   try {
     const { fileName, fileData, userNickname } = req.body;
 
-    // تحويل البيانات من Base64 (اللي جاية من الموبايل) لـ Buffer
+    if (!fileData) {
+      return res.status(400).json({ message: 'No file data received' });
+    }
+
+    // تحويل البيانات من Base64 لـ Buffer
     const content = Buffer.from(fileData, 'base64');
 
-    // تحديد مسار الملف جوه الريبو (هننظمه بالفولدرات)
-    const path = `videos/${userNickname || 'anonymous'}/${Date.now()}-${fileName}`;
+    // تنظيم المسار: فيديوهات / اسم المستخدم / التاريخ - اسم الملف
+    const path = `videos/${userNickname || 'user'}/${Date.now()}-${fileName}`;
 
-    // عملية الرفع الفعليه لـ GitHub
+    // الرفع الفعلي لـ GitHub
     await octokit.repos.createOrUpdateFileContents({
-      owner: 'AhmedMohamed', // اكتب هنا اسم اليوزر بتاعك في جيت هب
-      repo: 'my-cdn-storage', // اسم الريبو اللي عملته
+      owner: 'ahmedmkn999-alt', // اسم اليوزر بتاعك من الصورة
+      repo: 'video-storage',     // اسم الريبو بتاعك من الصورة
       path: path,
-      message: `رفع فيديو جديد من: ${userNickname}`,
+      message: `Upload: ${fileName} by ${userNickname || 'Orbit User'}`,
       content: content.toString('base64'),
     });
 
-    // الرد بلينك الفيديو المباشر (Raw link)
-    const videoUrl = `https://raw.githubusercontent.com/AhmedMohamed/my-cdn-storage/main/${path}`;
+    // رابط الفيديو الخام (Raw)
+    const videoUrl = `https://raw.githubusercontent.com/ahmedmkn999-alt/video-storage/main/${path}`;
 
     return res.status(200).json({
       success: true,
       url: videoUrl,
-      message: 'تم الرفع بنجاح لمخزنك الخاص!'
+      message: 'تم الرفع للمخزن بنجاح!'
     });
 
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ message: 'حصلت مشكلة في الرفع', error: error.message });
+    console.error("Error details:", error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'فشل الرفع للسيرفر', 
+      error: error.message 
+    });
   }
 }
