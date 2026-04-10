@@ -1,14 +1,22 @@
-import { createClient } from '@supabase/supabase-js';
-
 export default async function handler(req, res) {
-  const supabase = createClient(
-    'https://wwtbgrizaytnyodfojez.supabase.co',
-    process.env.SUPABASE_SERVICE_KEY
-  );
+  const SB_URL = 'https://wwtbgrizaytnyodfojez.supabase.co';
+  const SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+
+  const sql = async (query) => {
+    const r = await fetch(`${SB_URL}/rest/v1/rpc/exec_sql`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SERVICE_KEY,
+        'Authorization': `Bearer ${SERVICE_KEY}`
+      },
+      body: JSON.stringify({ sql: query })
+    });
+    return r.json();
+  };
 
   try {
-    // Create projects table
-    await supabase.rpc('exec_sql', { sql: `
+    await sql(`
       create table if not exists projects (
         id uuid default gen_random_uuid() primary key,
         user_id uuid references auth.users(id) on delete cascade,
@@ -16,10 +24,6 @@ export default async function handler(req, res) {
         token text not null,
         created_at timestamptz default now()
       );
-    `});
-
-    // Create videos table
-    await supabase.rpc('exec_sql', { sql: `
       create table if not exists videos (
         id uuid default gen_random_uuid() primary key,
         project_id uuid references projects(id) on delete cascade,
@@ -28,42 +32,16 @@ export default async function handler(req, res) {
         url text not null,
         created_at timestamptz default now()
       );
-    `});
-
-    // Enable RLS and policies
-    const { error } = await supabase.rpc('exec_sql', { sql: `
       alter table if exists projects enable row level security;
       alter table if exists videos enable row level security;
-      
-      do $$ begin
-        if not exists (select 1 from pg_policies where tablename='projects' and policyname='p_own') then
-          create policy "p_own" on projects for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-        end if;
-        if not exists (select 1 from pg_policies where tablename='projects' and policyname='p_read') then
-          create policy "p_read" on projects for select using (true);
-        end if;
-        if not exists (select 1 from pg_policies where tablename='videos' and policyname='v_own') then
-          create policy "v_own" on videos for all using (
-            project_id in (select id from projects where user_id = auth.uid())
-          ) with check (
-            project_id in (select id from projects where user_id = auth.uid())
-          );
-        end if;
-        if not exists (select 1 from pg_policies where tablename='videos' and policyname='v_read') then
-          create policy "v_read" on videos for select using (true);
-        end if;
-      end $$;
-    `});
+      create policy if not exists "p_own" on projects for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+      create policy if not exists "p_read" on projects for select using (true);
+      create policy if not exists "v_own" on videos for all using (project_id in (select id from projects where user_id = auth.uid())) with check (project_id in (select id from projects where user_id = auth.uid()));
+      create policy if not exists "v_read" on videos for select using (true);
+    `);
 
-    if (error) throw error;
-
-    return res.status(200).json({ success: true, message: 'تم إنشاء الجداول بنجاح ✅' });
-  } catch (err) {
-    // Tables might already exist via direct SQL — try a simpler check
-    const { data } = await supabase.from('projects').select('id').limit(1);
-    if (data !== null) {
-      return res.status(200).json({ success: true, message: 'الجداول موجودة بالفعل ✅' });
-    }
-    return res.status(500).json({ success: false, error: err.message });
+    res.status(200).json({ ok: true, msg: '✅ تم إنشاء الجداول بنجاح!' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
-}
+                         }
