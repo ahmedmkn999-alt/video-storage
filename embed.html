@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orbit Player</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #000;
+            color: #fff;
+            font-family: 'Segoe UI', sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Prevent text selection & drag */
+        * { -webkit-user-drag: none; }
+
+        .player-wrap {
+            width: 100%;
+            max-width: 960px;
+            background: #000;
+        }
+
+        .video-box {
+            position: relative;
+            width: 100%;
+            background: #000;
+        }
+
+        video {
+            width: 100%;
+            display: block;
+            max-height: 85vh;
+            background: #000;
+        }
+
+        /* Transparent shield - blocks right-click on the video surface */
+        .shield {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            background: transparent;
+            pointer-events: none; /* allow controls to work */
+        }
+
+        .watermark {
+            position: absolute;
+            bottom: 55px;
+            left: 12px;
+            color: rgba(255,255,255,0.25);
+            font-size: 0.75rem;
+            z-index: 2;
+            pointer-events: none;
+            letter-spacing: 1px;
+        }
+
+        .quality-bar {
+            background: #0d0d0d;
+            border-top: 1px solid #1a1a1a;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .ql { color: #555; font-size: 0.75rem; }
+
+        .qbtn {
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            color: #888;
+            padding: 4px 14px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.78rem;
+            transition: all 0.2s;
+            font-weight: 500;
+        }
+        .qbtn:hover { border-color: #00f2ff; color: #00f2ff; }
+        .qbtn.on {
+            background: linear-gradient(45deg, #00f2ff22, #7000ff22);
+            border-color: #00f2ff;
+            color: #00f2ff;
+            font-weight: bold;
+        }
+
+        /* States */
+        .state-screen {
+            text-align: center;
+            padding: 2rem;
+            width: 100%;
+        }
+        .state-screen .icon { font-size: 2.5rem; margin-bottom: 0.8rem; }
+        .state-screen .msg { color: #888; font-size: 0.9rem; margin-top: 0.3rem; }
+        .state-screen .title { font-size: 1.1rem; font-weight: bold; }
+        .state-screen.err .title { color: #ff6b6b; }
+        .state-screen.loading .title { color: #555; }
+    </style>
+</head>
+<body>
+
+<div class="player-wrap" id="root">
+    <div class="state-screen loading">
+        <div class="icon">⏳</div>
+        <div class="title">جاري التحميل...</div>
+    </div>
+</div>
+
+<script>
+// ──── CONFIG ────────────────────────────────────────────────
+const SB_URL = 'https://wwtbgrizaytnyodfojez.supabase.co';
+const SB_KEY = 'sb_publishable_pGfSV54JD67soTi1eb-Wfg_H0WfXzu9';
+const { createClient } = supabase;
+const db = createClient(SB_URL, SB_KEY);
+
+// ──── PROTECTION ────────────────────────────────────────────
+// Block right-click everywhere
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+// Block download shortcuts
+document.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && ['s','u','a','p'].includes(k)) { e.preventDefault(); return false; }
+    if (e.key === 'F12') { e.preventDefault(); return false; }
+});
+
+// Disable drag on entire page
+document.addEventListener('dragstart', e => e.preventDefault());
+
+// ──── INIT ───────────────────────────────────────────────────
+async function init() {
+    const p = new URLSearchParams(location.search);
+    const projectId = p.get('project');
+    const token     = p.get('token');
+
+    if (!projectId || !token) { showErr('⛔', 'رابط غير صحيح'); return; }
+
+    // Fetch project
+    const { data: proj, error: pe } = await db
+        .from('projects').select('*').eq('id', projectId).single();
+
+    if (pe || !proj)          { showErr('❌', 'المشروع غير موجود'); return; }
+    if (proj.token !== token) { showErr('⛔', 'غير مصرح بالوصول'); return; }
+
+    // Fetch videos
+    const { data: vids } = await db
+        .from('videos').select('*').eq('project_id', projectId)
+        .order('quality', { ascending: false });
+
+    if (!vids || !vids.length) { showErr('📭', 'مفيش فيديوهات في هذا المشروع'); return; }
+
+    render(proj, vids);
+}
+
+// ──── RENDER ─────────────────────────────────────────────────
+function render(proj, vids) {
+    const root = document.getElementById('root');
+    const def  = vids[0];
+
+    root.innerHTML = `
+        <div class="video-box">
+            <video id="vid"
+                controls
+                playsinline
+                controlsList="nodownload"
+                disablePictureInPicture
+                src="${def.url}">
+                متصفحك لا يدعم تشغيل الفيديو
+            </video>
+            <div class="shield" id="shield"></div>
+            <div class="watermark">☁️ ORBIT</div>
+        </div>
+        <div class="quality-bar">
+            <span class="ql">الجودة:</span>
+            ${vids.map((v,i) => `
+                <button class="qbtn ${i===0?'on':''}"
+                    data-url="${v.url}"
+                    onclick="switchQ('${v.url}',this)">
+                    ${v.quality}
+                </button>`).join('')}
+        </div>
+    `;
+
+    const vid = document.getElementById('vid');
+
+    // Prevent right-click directly on video (extra layer)
+    vid.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Prevent drag download
+    vid.addEventListener('dragstart', e => e.preventDefault());
+}
+
+// ──── QUALITY SWITCH ─────────────────────────────────────────
+function switchQ(url, btn) {
+    const vid  = document.getElementById('vid');
+    const time = vid.currentTime;
+    const playing = !vid.paused;
+
+    vid.src = url;
+    vid.load();
+    vid.currentTime = time;
+    if (playing) vid.play().catch(()=>{});
+
+    document.querySelectorAll('.qbtn').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+}
+
+// ──── ERROR SCREEN ───────────────────────────────────────────
+function showErr(icon, msg) {
+    document.getElementById('root').innerHTML = `
+        <div class="state-screen err">
+            <div class="icon">${icon}</div>
+            <div class="title">${msg}</div>
+            <div class="msg">تواصل مع صاحب المحتوى</div>
+        </div>`;
+}
+
+// ──── START ──────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
