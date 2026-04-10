@@ -3,14 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Orbit Video Server | سيرفر الفيديوهات</title>
+    <title>Orbit Video Cloud</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         :root {
-            --primary: #00f2ff; /* لون نيون سيان */
-            --accent: #7000ff;  /* بنفسجي */
+            --primary: #00f2ff;
+            --accent: #7000ff;
             --bg: #0a0a0b;
             --card: #16161a;
         }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
             background-color: var(--bg);
@@ -19,133 +22,220 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
-            margin: 0;
+            min-height: 100vh;
+            padding: 1rem;
         }
 
         .upload-card {
             background: var(--card);
             padding: 2rem;
             border-radius: 20px;
-            box-shadow: 0 0 20px rgba(0, 242, 255, 0.1);
-            width: 90%;
-            max-width: 400px;
+            box-shadow: 0 0 30px rgba(0, 242, 255, 0.1);
+            width: 100%;
+            max-width: 420px;
             text-align: center;
             border: 1px solid #333;
         }
 
-        h1 { color: var(--primary); font-size: 1.5rem; margin-bottom: 1rem; }
+        h1 { color: var(--primary); font-size: 1.5rem; margin-bottom: 0.5rem; }
+        p { color: #aaa; font-size: 0.9rem; margin-bottom: 1.5rem; }
 
-        .file-input-container {
+        .file-drop {
             border: 2px dashed #444;
-            padding: 2rem;
+            padding: 2rem 1rem;
             border-radius: 15px;
             cursor: pointer;
             transition: 0.3s;
             margin-bottom: 1.5rem;
+            position: relative;
         }
 
-        .file-input-container:hover { border-color: var(--primary); }
+        .file-drop:hover, .file-drop.dragover { border-color: var(--primary); background: rgba(0,242,255,0.03); }
+
+        .file-drop .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+        .file-drop span { color: #888; font-size: 0.9rem; display: block; }
+        .file-drop .file-name { color: var(--primary); font-size: 0.85rem; margin-top: 0.5rem; word-break: break-all; }
 
         #videoInput { display: none; }
 
-        button {
+        .upload-btn {
             background: linear-gradient(45deg, var(--primary), var(--accent));
             border: none;
-            padding: 12px 30px;
+            padding: 14px;
             color: white;
-            border-radius: 10px;
+            border-radius: 12px;
             font-weight: bold;
             cursor: pointer;
             width: 100%;
             font-size: 1rem;
+            transition: opacity 0.2s;
+        }
+
+        .upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .progress-wrap {
+            margin-top: 1.2rem;
+            display: none;
         }
 
         .progress-bar {
             height: 8px;
             background: #222;
             border-radius: 10px;
-            margin-top: 1rem;
-            display: none;
             overflow: hidden;
+            margin-bottom: 0.5rem;
         }
 
         #progressInner {
             height: 100%;
-            background: var(--primary);
+            background: linear-gradient(90deg, var(--primary), var(--accent));
             width: 0%;
-            transition: 0.3s;
+            transition: width 0.3s;
+            border-radius: 10px;
         }
 
-        #status { margin-top: 1rem; font-size: 0.9rem; color: #aaa; }
+        #progressText { font-size: 0.8rem; color: #888; }
+
+        #status {
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            color: #aaa;
+            line-height: 1.6;
+        }
+
+        #status.success { color: #00f2aa; }
+        #status.error { color: #ff4d6d; }
+
+        .copy-btn {
+            background: #222;
+            border: 1px solid #444;
+            color: var(--primary);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            margin-top: 0.8rem;
+            width: 100%;
+            transition: background 0.2s;
+        }
+
+        .copy-btn:hover { background: #2a2a2a; }
     </style>
 </head>
 <body>
 
 <div class="upload-card">
-    <h1>Orbit Video Cloud</h1>
+    <h1>☁️ Orbit Video Cloud</h1>
     <p>ارفع فيديوهاتك على سيرفرك الخاص مجاناً</p>
-    
-    <div class="file-input-container" onclick="document.getElementById('videoInput').click()">
-        <span id="fileName">اضغط لاختيار فيديو</span>
+
+    <div class="file-drop" id="dropZone" onclick="document.getElementById('videoInput').click()">
+        <div class="icon">🎬</div>
+        <span>اضغط أو اسحب الفيديو هنا</span>
+        <div class="file-name" id="fileName"></div>
         <input type="file" id="videoInput" accept="video/*">
     </div>
 
-    <button onclick="uploadVideo()">بدء الرفع 🚀</button>
+    <button class="upload-btn" onclick="uploadVideo()" id="uploadBtn">🚀 بدء الرفع</button>
 
-    <div class="progress-bar" id="progressBar">
-        <div id="progressInner"></div>
+    <div class="progress-wrap" id="progressWrap">
+        <div class="progress-bar">
+            <div id="progressInner"></div>
+        </div>
+        <div id="progressText">0%</div>
     </div>
 
     <div id="status"></div>
+    <button class="copy-btn" id="copyBtn" style="display:none" onclick="copyLink()">📋 انسخ رابط الفيديو</button>
 </div>
 
 <script>
+    const SUPABASE_URL = 'https://wwtbgrizaytnyodfojez.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_pGfSV54JD67soTi1eb-Wfg_H0WfXzu9';
+    const BUCKET = 'videos';
+
+    const { createClient } = supabase;
+    const client = createClient(SUPABASE_URL, SUPABASE_KEY);
+
     const videoInput = document.getElementById('videoInput');
-    const fileNameDisplay = document.getElementById('fileName');
+    const fileNameEl = document.getElementById('fileName');
     const status = document.getElementById('status');
+    const progressWrap = document.getElementById('progressWrap');
     const progressInner = document.getElementById('progressInner');
-    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const dropZone = document.getElementById('dropZone');
+
+    let videoUrl = '';
 
     videoInput.onchange = () => {
-        fileNameDisplay.innerText = videoInput.files[0].name;
+        if (videoInput.files[0]) {
+            fileNameEl.innerText = '📁 ' + videoInput.files[0].name;
+        }
     };
 
+    // Drag & Drop
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('video/')) {
+            videoInput.files = e.dataTransfer.files;
+            fileNameEl.innerText = '📁 ' + file.name;
+        }
+    });
+
     async function uploadVideo() {
-        if (!videoInput.files[0]) return alert('اختار فيديو الأول يا بطل!');
-
         const file = videoInput.files[0];
-        const reader = new FileReader();
+        if (!file) return alert('اختار فيديو الأول يا بطل!');
 
-        status.innerText = "جاري تجهيز الملف...";
-        progressBar.style.display = "block";
+        uploadBtn.disabled = true;
+        copyBtn.style.display = 'none';
+        progressWrap.style.display = 'block';
+        progressInner.style.width = '10%';
+        progressText.innerText = 'جاري الرفع...';
+        status.className = '';
+        status.innerText = '';
 
-        reader.readAsDataURL(file);
-        reader.onload = async () => {
-            const base64Data = reader.result.split(',')[1];
-            
-            try {
-                const response = await fetch('/api/upload', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        fileName: file.name,
-                        fileData: base64Data,
-                        userNickname: 'Ahmed' // ممكن تخليها ديناميكية بعدين
-                    })
-                });
+        const fileName = `${Date.now()}-${file.name.replace(/[^\w.-]/g, '_')}`;
+        const filePath = `uploads/${fileName}`;
 
-                const result = await response.json();
-                if (result.success) {
-                    status.innerHTML = `تم الرفع! <br> <a href="${result.url}" target="_blank" style="color:var(--primary)">اضغط هنا لفتح الفيديو</a>`;
-                    progressInner.style.width = "100%";
-                } else {
-                    status.innerText = "فشل الرفع: " + result.message;
-                }
-            } catch (err) {
-                status.innerText = "خطأ في الاتصال بالسيرفر";
-            }
-        };
+        const { data, error } = await client.storage
+            .from(BUCKET)
+            .upload(filePath, file, {
+                cacheControl: '3600',
+                upsert: false,
+                contentType: file.type,
+            });
+
+        if (error) {
+            status.className = 'error';
+            status.innerText = '❌ فشل الرفع: ' + error.message;
+            progressInner.style.width = '0%';
+            progressText.innerText = '';
+            uploadBtn.disabled = false;
+            return;
+        }
+
+        progressInner.style.width = '100%';
+        progressText.innerText = '100%';
+
+        const { data: urlData } = client.storage.from(BUCKET).getPublicUrl(filePath);
+        videoUrl = urlData.publicUrl;
+
+        status.className = 'success';
+        status.innerHTML = `✅ تم الرفع بنجاح!<br><a href="${videoUrl}" target="_blank" style="color:var(--primary)">افتح الفيديو 🎬</a>`;
+        copyBtn.style.display = 'block';
+        uploadBtn.disabled = false;
+    }
+
+    function copyLink() {
+        navigator.clipboard.writeText(videoUrl).then(() => {
+            copyBtn.innerText = '✅ تم النسخ!';
+            setTimeout(() => copyBtn.innerText = '📋 انسخ رابط الفيديو', 2000);
+        });
     }
 </script>
 
